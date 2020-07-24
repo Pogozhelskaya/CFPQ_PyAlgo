@@ -4,7 +4,7 @@ from src.grammar.cnf_grammar import CnfGrammar
 from src.graph.label_graph import LabelGraph
 from src.utils.time_profiler import SimpleTimer
 from src.algo.matrix_base import matrix_base_algo
-from src.algo.single_source import SingleSourceAlgoBrute
+from src.algo.single_source import SingleSourceAlgoOpt
 
 g = LabelGraph.from_txt('deps/CFPQ_Data/data/WorstCase/Matrices/worstcase_128.txt')
 gr = CnfGrammar.from_cnf('deps/CFPQ_Data/data/WorstCase/Grammars/Brackets.cnf')
@@ -12,7 +12,7 @@ gr = CnfGrammar.from_cnf('deps/CFPQ_Data/data/WorstCase/Grammars/Brackets.cnf')
 with SimpleTimer():
     m = matrix_base_algo(g, gr)
 
-ms = SingleSourceAlgoBrute(g, gr)
+ms = SingleSourceAlgoOpt(g, gr)
 with SimpleTimer():
     m1 = ms.solve(range(0, 128))
 

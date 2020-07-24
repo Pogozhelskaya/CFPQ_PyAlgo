@@ -16,7 +16,7 @@ class SingleSourceIndex:
 
     def init_simple_rules(self):
         for l, r in self.grammar.simple_rules:
-            self.nonterms[l] = self.graph[r].dup()
+            self.nonterms[l] += self.graph[r]
 
 
 class SingleSourceSolver(ABC):
@@ -39,39 +39,71 @@ class SingleSourceAlgoSmart(SingleSourceSolver):
         pass
 
 
-class SingleSourceAlgoBrute(SingleSourceSolver):
+class SingleSourceAlgoOpt(SingleSourceSolver):
     def __init__(self, graph: LabelGraph, grammar: CnfGrammar):
         super().__init__(graph, grammar)
+        self.index = SingleSourceIndex(graph, grammar)
 
     def solve(self, sources_vertices: Iterable) -> Matrix:
-        index = SingleSourceIndex(self.graph, self.grammar)
-
-        index.init_simple_rules()
-
+        cur_index = SingleSourceIndex(self.graph, self.grammar)
+        # Initialize simple rules
+        cur_index.init_simple_rules()
+        # Initialize source matrices masks
         for v in sources_vertices:
-            index.sources[index.grammar.start_nonterm][v, v] = True
-
+            cur_index.sources[self.index.grammar.start_nonterm][v, v] = True
+        SingleSourceAlgoOpt.__update_sources(
+            self.index.sources[self.index.grammar.start_nonterm],
+            cur_index.sources[self.index.grammar.start_nonterm],
+            self.index.sources[self.index.grammar.start_nonterm])
+        # Create temporary matrix
+        tmp = Matrix.sparse(BOOL,
+                            cur_index.graph.matrices_size,
+                            cur_index.graph.matrices_size)
+        # Algo's body
         changed = True
-
         while changed:
-            for l, r1, r2 in index.grammar.complex_rules:
-                old_nnz = index.nonterms[l].nvals
+            changed = False
+            # Iterate through all complex rules
+            for l, r1, r2 in self.index.grammar.complex_rules:
+                # Number of instances before operation
+                old_nnz = cur_index.nonterms[l].nvals
 
-                i_l, j_l, vs_l = index.sources[l].to_lists()
-                for v, to in list(zip(i_l, j_l)):
-                    index.sources[r1][to, to] = True
+                # l -> r1 r2 ==> l += (l_src * r1) * r2 =>
 
-                tmp = Matrix.sparse(BOOL, index.graph.matrices_size,
-                                    index.graph.matrices_size)
-                tmp = index.sources[l] @ index.nonterms[r1]
+                # 1) r1_src += {(j, j) : (i, j) \in l_src}
+                SingleSourceAlgoOpt.__update_sources(cur_index.sources[l],
+                                                     cur_index.sources[r1],
+                                                     self.index.sources[r1])
 
-                i_r2, j_r2, vs_r2 = tmp.to_lists()
-                for v, to in list(zip(i_r2, j_r2)):
-                    index.sources[r2][to, to] = True
+                # 2) tmp = l_src * r1
+                tmp = cur_index.sources[l] @ cur_index.nonterms[r1]
 
-                index.nonterms[l] += tmp @ index.nonterms[r2]
+                # 3) r2_src += {(j, j) : (i, j) \in tmp}
+                SingleSourceAlgoOpt.__update_sources(tmp,
+                                                     cur_index.sources[r2],
+                                                     self.index.sources[r2])
 
-                new_nnz = index.nonterms[l].nvals
-                changed = not old_nnz == new_nnz
+                # 4) l += tmp * r2
+                cur_index.nonterms[l] += tmp @ cur_index.nonterms[r2]
 
-        return index.nonterms[index.grammar.start_nonterm]
+                # Number of instances after operation
+                new_nnz = cur_index.nonterms[l].nvals
+
+                # Update changed flag
+                changed |= not old_nnz == new_nnz
+
+        for nonterm in self.grammar.nonterms:
+            self.index.nonterms[nonterm] += cur_index.nonterms[nonterm]
+            self.index.sources[nonterm] += cur_index.sources[nonterm]
+        return self.index.nonterms[self.index.grammar.start_nonterm]
+
+    @staticmethod
+    def __update_sources(src: Matrix, dst: Matrix, msk: Matrix):
+        i_src, j_src, v_src = src.to_lists()
+        for k in range(len(j_src)):
+            if v_src[k] is True:
+                dst[j_src[k], j_src[k]] = True
+
+        for v in msk.ncols:
+            if dst[v, v] is True & msk[v, v] is True:
+                dst[v, v] = False
