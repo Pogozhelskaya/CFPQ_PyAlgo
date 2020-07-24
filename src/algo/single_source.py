@@ -16,7 +16,7 @@ class SingleSourceIndex:
 
     def init_simple_rules(self):
         for l, r in self.grammar.simple_rules:
-            self.nonterms[l] += self.graph[r]
+            self.nonterms[l] = self.graph[r].dup()
 
 
 class SingleSourceSolver(ABC):
@@ -51,14 +51,11 @@ class SingleSourceAlgoOpt(SingleSourceSolver):
         # Initialize source matrices masks
         for v in sources_vertices:
             cur_index.sources[self.index.grammar.start_nonterm][v, v] = True
-        SingleSourceAlgoOpt.__update_sources(
-            self.index.sources[self.index.grammar.start_nonterm],
-            cur_index.sources[self.index.grammar.start_nonterm],
-            self.index.sources[self.index.grammar.start_nonterm])
+        SingleSourceAlgoOpt.__update_sources(self.index.sources[self.index.grammar.start_nonterm],
+                                             cur_index.sources[self.index.grammar.start_nonterm],
+                                             self.index.sources[self.index.grammar.start_nonterm])
         # Create temporary matrix
-        tmp = Matrix.sparse(BOOL,
-                            cur_index.graph.matrices_size,
-                            cur_index.graph.matrices_size)
+        tmp = Matrix.sparse(BOOL, cur_index.graph.matrices_size, cur_index.graph.matrices_size)
         # Algo's body
         changed = True
         while changed:
@@ -71,20 +68,20 @@ class SingleSourceAlgoOpt(SingleSourceSolver):
                 # l -> r1 r2 ==> l += (l_src * r1) * r2 =>
 
                 # 1) r1_src += {(j, j) : (i, j) \in l_src}
-                SingleSourceAlgoOpt.__update_sources(cur_index.sources[l],
-                                                     cur_index.sources[r1],
+                SingleSourceAlgoOpt.__update_sources(self.index.sources[l], cur_index.sources[r1],
                                                      self.index.sources[r1])
 
                 # 2) tmp = l_src * r1
                 tmp = cur_index.sources[l] @ cur_index.nonterms[r1]
 
                 # 3) r2_src += {(j, j) : (i, j) \in tmp}
-                SingleSourceAlgoOpt.__update_sources(tmp,
-                                                     cur_index.sources[r2],
-                                                     self.index.sources[r2])
+                SingleSourceAlgoOpt.__update_sources(tmp, cur_index.sources[r2], self.index.sources[r2])
 
                 # 4) l += tmp * r2
                 cur_index.nonterms[l] += tmp @ cur_index.nonterms[r2]
+
+                # Clear temporary matrix
+                tmp.clear()
 
                 # Number of instances after operation
                 new_nnz = cur_index.nonterms[l].nvals
@@ -92,18 +89,13 @@ class SingleSourceAlgoOpt(SingleSourceSolver):
                 # Update changed flag
                 changed |= not old_nnz == new_nnz
 
-        for nonterm in self.grammar.nonterms:
-            self.index.nonterms[nonterm] += cur_index.nonterms[nonterm]
-            self.index.sources[nonterm] += cur_index.sources[nonterm]
+        self.index.nonterms[self.index.grammar.start_nonterm] \
+            += cur_index.nonterms[self.index.grammar.start_nonterm]
         return self.index.nonterms[self.index.grammar.start_nonterm]
 
     @staticmethod
     def __update_sources(src: Matrix, dst: Matrix, msk: Matrix):
-        i_src, j_src, v_src = src.to_lists()
-        for k in range(len(j_src)):
-            if v_src[k] is True:
-                dst[j_src[k], j_src[k]] = True
-
-        for v in msk.ncols:
-            if dst[v, v] is True & msk[v, v] is True:
-                dst[v, v] = False
+        for j in src.to_lists()[1]:
+            dst[j, j] = True
+        for j in msk.to_lists()[1]:
+            msk[j, j] = False
